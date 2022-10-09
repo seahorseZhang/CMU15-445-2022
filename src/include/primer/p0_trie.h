@@ -303,15 +303,15 @@ class Trie {
 
   template <typename T>
   bool Insert(const std::string &key, T value, std::unique_ptr<TrieNode> *node_ptr) {
-    LOG_INFO("Insert value, key: %s", key.c_str());
     if (key.length() == 1) {
       if (node_ptr->get()->HasChild(key[0])) {
-        auto node = node_ptr->get()->GetChildNode(key[0]);
+        std::unique_ptr<TrieNode> *node = node_ptr->get()->GetChildNode(key[0]);
         if (node->get()->IsEndNode()) {
           latch_.WUnlock();
           return false;
         }
-        auto replace_node = std::make_unique<TrieNodeWithValue<T>>(std::move(*node->release()), value);
+        auto replace_node = std::make_unique<TrieNodeWithValue<T>>(std::move(*(node->get())), value);
+        node_ptr->get()->RemoveChildNode(key[0]);
         node_ptr->get()->InsertChildNode(key[0], std::move(replace_node));
         latch_.WUnlock();
         return true;
@@ -348,33 +348,40 @@ class Trie {
    * @return True if key exists and is removed, false otherwise
    */
   bool Remove(const std::string &key) {
-    LOG_INFO("Remove oper, key: %s", key.c_str());
+    latch_.WLock();
     if (key.length() == 0) {
       return false;
     }
+    return RemoveInner(key);
+  }
+
+  bool RemoveInner(const std::string &key) {
     auto target_node = FindTerminal(key, &root_);
     if (target_node != nullptr && target_node->get()->IsEndNode()) {
       if (target_node->get()->HasChildren()) {
         target_node->get()->SetEndNode(false);
+        latch_.WUnlock();
         return true;
       }
       auto parent_node = FindTerminal(key.substr(0, key.length() - 1), &root_, false);
       parent_node->get()->RemoveChildNode(key[key.length() - 1]);
       if (parent_node->get()->IsEndNode()) {
+        latch_.WUnlock();
         return true;
       }
       parent_node->get()->SetEndNode(true);
       if (key.length() <= 1) {
+        latch_.WUnlock();
         return true;
       }
-      return Remove(key.substr(0, key.length() - 1));
+      return RemoveInner(key.substr(0, key.length() - 1));
     }
+    latch_.WUnlock();
     return false;
   }
 
   std::unique_ptr<TrieNode> *FindTerminal(const std::string &key, std::unique_ptr<TrieNode> *node,
                                           bool require_end = true) {
-    LOG_INFO("Find terminal, key: %s", key.c_str());
     if (key.empty()) {
       return &root_;
     }
@@ -412,7 +419,6 @@ class Trie {
    */
   template <typename T>
   T GetValue(const std::string &key, bool *success) {
-    LOG_INFO("Get value, key: %s", key.c_str());
     if (key.empty()) {
       *success = false;
       return {};

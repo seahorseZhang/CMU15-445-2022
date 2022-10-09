@@ -21,6 +21,7 @@
 
 #include "common/exception.h"
 #include "common/rwlatch.h"
+#include "common/logger.h"
 
 namespace bustub {
 
@@ -71,7 +72,7 @@ class TrieNode {
    * @param key_char Key char of child node.
    * @return True if this trie node has a child with given key, false otherwise.
    */
-  bool HasChild(char key_char) const { return children_.count(key_char) != 0; }
+  bool HasChild(char key_char) const { return children_.find(key_char) != children_.end(); }
 
   /**
    * TODO(P0): Add implementation
@@ -296,24 +297,28 @@ class Trie {
     if (key.empty()) {
       return false;
     }
+    latch_.WLock();
     return Insert(key, value, &root_);
   }
 
   template <typename T>
   bool Insert(const std::string &key, T value, std::unique_ptr<TrieNode> *node_ptr) {
+    LOG_INFO("Insert value, key: %s", key.c_str());
     if (key.length() == 1) {
       if (node_ptr->get()->HasChild(key[0])) {
         auto node = node_ptr->get()->GetChildNode(key[0]);
         if (node->get()->IsEndNode()) {
+          latch_.WUnlock();
           return false;
         }
-        std::unique_ptr<TrieNodeWithValue<T>> replace_node(
-            new TrieNodeWithValue<T>(std::move(*node->release()), value));
+        auto replace_node = std::make_unique<TrieNodeWithValue<T>>(std::move(*node->release()), value);
         node_ptr->get()->InsertChildNode(key[0], std::move(replace_node));
+        latch_.WUnlock();
         return true;
       }
       std::unique_ptr<TrieNode> insert_nd(new TrieNodeWithValue(key[0], value));
       node_ptr->get()->InsertChildNode(key[0], std::move(insert_nd));
+      latch_.WUnlock();
       return true;
     }
     if (node_ptr->get()->HasChild(key[0])) {
@@ -343,6 +348,7 @@ class Trie {
    * @return True if key exists and is removed, false otherwise
    */
   bool Remove(const std::string &key) {
+    LOG_INFO("Remove oper, key: %s", key.c_str());
     if (key.length() == 0) {
       return false;
     }
@@ -368,6 +374,7 @@ class Trie {
 
   std::unique_ptr<TrieNode> *FindTerminal(const std::string &key, std::unique_ptr<TrieNode> *node,
                                           bool require_end = true) {
+    LOG_INFO("Find terminal, key: %s", key.c_str());
     if (key.empty()) {
       return &root_;
     }
@@ -405,21 +412,26 @@ class Trie {
    */
   template <typename T>
   T GetValue(const std::string &key, bool *success) {
+    LOG_INFO("Get value, key: %s", key.c_str());
     if (key.empty()) {
       *success = false;
       return {};
     }
+    latch_.RLock();
     std::unique_ptr<TrieNode> *node = FindTerminal(key, &root_);
     if (!node || !node->get()->IsEndNode()) {
       *success = false;
+      latch_.RUnlock();
       return {};
     }
     auto *node_with_value = dynamic_cast<TrieNodeWithValue<T> *>(node->get());
     if (!node_with_value) {
       *success = false;
+      latch_.RUnlock();
       return {};
     }
     *success = true;
+    latch_.RUnlock();
     return node_with_value->GetValue();
   }
 };

@@ -426,14 +426,14 @@ class Trie {
     latch_.RLock();
     std::unique_ptr<TrieNode> *node = FindTerminal(key, &root_);
     if (!node || !node->get()->IsEndNode()) {
-      *success = false;
       latch_.RUnlock();
+      *success = false;
       return {};
     }
     auto *node_with_value = dynamic_cast<TrieNodeWithValue<T> *>(node->get());
     if (!node_with_value) {
-      *success = false;
       latch_.RUnlock();
+      *success = false;
       return {};
     }
     *success = true;
